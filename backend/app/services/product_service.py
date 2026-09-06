@@ -26,9 +26,11 @@ from app.schemas.product import (
 )
 from app.schemas.catalogue import CatalogueResponse, CatalogueUpdate
 from app.schemas.pricing import PricingResponse, PriceSchema
+from app.schemas.pricing import PriceRecalculateRequest
 from app.services.pipeline_service import run_ai_pipeline
 from app.storage.supabase_storage import get_storage_service
 from app.utils.file_validation import validate_image_file, validate_audio_file
+from app.ai_mocks.mock_ai_services import calculate_price, explain_price
 
 
 class ProductService:
@@ -116,7 +118,13 @@ class ProductService:
         self.product_repo.add_audio(product_id, audio_url)
         return UploadAudioResponse(product_id=product_id, audio_url=audio_url)
 
-    def trigger_processing(self, product_id: str, background_tasks: BackgroundTasks, user: User) -> ProcessProductResponse:
+    def trigger_processing(
+        self,
+        product_id: str,
+        background_tasks: BackgroundTasks,
+        user: User,
+        transcript: Optional[str] = None,
+    ) -> ProcessProductResponse:
         product = self.product_repo.get_by_id(product_id)
         if not product:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="NOT_FOUND: Product not found")
@@ -125,7 +133,7 @@ class ProductService:
         self.validate_status_transition(product.status, ProductStatus.PROCESSING)
         self.product_repo.update_status(product_id, ProductStatus.PROCESSING, step="understanding_image", progress=10)
 
-        background_tasks.add_task(run_ai_pipeline, product_id)
+        background_tasks.add_task(run_ai_pipeline, product_id, transcript)
         self.audit_repo.log_action(user_id=user.id, action="product_processing_trigger", metadata={"product_id": product_id})
 
         return ProcessProductResponse(
@@ -222,6 +230,37 @@ class ProductService:
             price=price_schema,
             pricing=pricing_schema,
             opportunities=opps,
+        )
+
+    def recalculate_price(
+        self,
+        product_id: str,
+        req: PriceRecalculateRequest,
+        user: User,
+    ) -> PriceSchema:
+        product = self.product_repo.get_by_id(product_id)
+        if not product:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="NOT_FOUND: Product not found")
+        self.verify_ownership(product, user)
+
+        price_data = calculate_price(
+            material_cost=req.material_cost,
+            days_to_make=req.days_to_make,
+            complexity=req.complexity,
+        )
+        explanation = explain_price(price_data)
+        self.pricing_repo.create_or_update(
+            product_id=product_id,
+            suggested_price=price_data["suggested_price"],
+            price_range_low=price_data["price_range"][0],
+            price_range_high=price_data["price_range"][1],
+            explanation=explanation,
+        )
+
+        return PriceSchema(
+            suggested_price=price_data["suggested_price"],
+            price_range=price_data["price_range"],
+            explanation=explanation,
         )
 
     def update_catalogue(self, product_id: str, req: CatalogueUpdate, user: User) -> ProductUpdateResponse:

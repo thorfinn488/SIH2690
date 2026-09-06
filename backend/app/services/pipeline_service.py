@@ -1,5 +1,6 @@
 import logging
 import traceback
+from typing import Optional
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.repositories.product_repository import ProductRepository
@@ -26,7 +27,7 @@ from app.ai_mocks.mock_ai_services import (
 logger = logging.getLogger(__name__)
 
 
-def run_ai_pipeline(product_id: str):
+def run_ai_pipeline(product_id: str, transcript: Optional[str] = None):
     """
     Background worker function executing the 6-step AI orchestration sequence.
     Uses an independent DB session.
@@ -72,16 +73,20 @@ def run_ai_pipeline(product_id: str):
         if product.audio and len(product.audio) > 0:
             audio_bytes = b"sample_artisan_audio_bytes"
         
-        transcription_res = transcribe(audio_bytes)
-        translation_res = translate_to_english(
-            text=transcription_res.get("raw_text", ""),
-            source_language=transcription_res.get("detected_language", "hi")
-        )
+        if transcript and transcript.strip():
+            translated_text = transcript.strip()
+        else:
+            transcription_res = transcribe(audio_bytes)
+            translation_res = translate_to_english(
+                text=transcription_res.get("raw_text", ""),
+                source_language=transcription_res.get("detected_language", "hi")
+            )
+            translated_text = translation_res.get("translated_text", "")
 
         # 3. Generating catalogue
         product_repo.update_status(product_id, ProductStatus.PROCESSING, step="generating_catalogue", progress=55)
         product_understanding = understand_product(
-            transcript=translation_res.get("translated_text", ""),
+            transcript=translated_text,
             vision_data=vision_data
         )
         craft_info = get_craft_context(product_understanding.get("craft", "Handicrafts"))

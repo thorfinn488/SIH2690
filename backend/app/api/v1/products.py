@@ -6,6 +6,7 @@ from app.database import get_db
 from app.schemas.common import ResponseEnvelope
 from app.schemas.product import (
     ProductCreateRequest,
+    ProcessProductRequest,
     ProductCreateResponse,
     UploadImageResponse,
     UploadAudioResponse,
@@ -19,6 +20,7 @@ from app.schemas.product import (
     OpportunityListItem,
 )
 from app.schemas.catalogue import CatalogueUpdate
+from app.schemas.pricing import PriceRecalculateRequest, PriceSchema
 from app.services.product_service import ProductService
 from app.repositories.opportunity_repository import OpportunityRepository
 from app.middleware.auth_middleware import get_current_user
@@ -69,11 +71,12 @@ async def upload_product_audio(
 def trigger_processing(
     id: str,
     background_tasks: BackgroundTasks,
+    req: Optional[ProcessProductRequest] = None,
     current_user: User = Depends(require_role("ARTISAN", "ADMIN")),
     db: Session = Depends(get_db),
 ):
     service = ProductService(db)
-    res = service.trigger_processing(id, background_tasks, current_user)
+    res = service.trigger_processing(id, background_tasks, current_user, req.transcript if req else None)
     return ResponseEnvelope.success_response(res)
 
 
@@ -96,6 +99,22 @@ def get_product(
 ):
     service = ProductService(db)
     res = service.get_product_detail(id, current_user)
+    return ResponseEnvelope.success_response(res)
+
+
+@router.post(
+    "/products/{id}/recalculate-price",
+    response_model=ResponseEnvelope[PriceSchema],
+    status_code=status.HTTP_200_OK,
+)
+def recalculate_price(
+    id: str,
+    req: PriceRecalculateRequest,
+    current_user: User = Depends(require_role("ARTISAN", "ADMIN")),
+    db: Session = Depends(get_db),
+):
+    service = ProductService(db)
+    res = service.recalculate_price(id, req, current_user)
     return ResponseEnvelope.success_response(res)
 
 
