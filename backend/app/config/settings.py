@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./sih26090.db"
     SUPABASE_URL: str = ""
     SUPABASE_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
     JWT_SECRET: str = "dev_secret_key_sih26090_change_in_production_12345"
     JWT_EXPIRY_MINUTES: int = 1440
     STORAGE_BACKEND: str = "local"  # "local" | "supabase"

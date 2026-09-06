@@ -1,19 +1,69 @@
 import React, { useState, useRef } from 'react';
-import { Mic, Square, Play, Volume2, CheckCircle2, RefreshCw } from 'lucide-react';
+import { Mic, Square, Volume2, CheckCircle2, RefreshCw } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
 interface AudioRecorderProps {
   onAudioReady: (audioBlob: Blob) => void;
+  onTranscriptReady?: (transcript: string) => void;
 }
 
-export const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioReady }) => {
-  const { t } = useLanguage();
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+interface SpeechRecognitionConstructor {
+  new (): SpeechRecognitionInstance;
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  }
+}
+
+export const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioReady, onTranscriptReady }) => {
+  const { language, t } = useLanguage();
   const [isRecording, setIsRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [recordingTime, setRecordingTime] = useState(0);
+  const [liveTranscript, setLiveTranscript] = useState('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const transcriptRef = useRef('');
   const timerRef = useRef<any>(null);
+
+  const getRecognition = () => {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) return null;
+
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = language === 'hi' ? 'hi-IN' : 'en-IN';
+    recognition.onresult = (event) => {
+      let transcript = '';
+      for (let index = 0; index < event.results.length; index += 1) {
+        transcript += event.results[index][0].transcript;
+      }
+      transcriptRef.current = transcript.trim();
+      setLiveTranscript(transcriptRef.current);
+    };
+    recognition.onerror = () => undefined;
+    return recognition;
+  };
 
   const startRecording = async () => {
     try {
@@ -33,9 +83,19 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioReady }) =>
         const url = URL.createObjectURL(blob);
         setAudioUrl(url);
         onAudioReady(blob);
+        onTranscriptReady?.(transcriptRef.current);
         stream.getTracks().forEach((track) => track.stop());
       };
 
+      transcriptRef.current = '';
+      setLiveTranscript('');
+      const recognition = getRecognition();
+      recognitionRef.current = recognition;
+      try {
+        recognition?.start();
+      } catch (err) {
+        recognitionRef.current = null;
+      }
       mediaRecorder.start();
       setIsRecording(true);
       setRecordingTime(0);
@@ -51,6 +111,8 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioReady }) =>
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       if (timerRef.current) clearInterval(timerRef.current);
@@ -58,6 +120,8 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioReady }) =>
   };
 
   const simulateRecording = () => {
+    transcriptRef.current = '';
+    setLiveTranscript('');
     setIsRecording(true);
     setRecordingTime(0);
     timerRef.current = setInterval(() => {
@@ -70,6 +134,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioReady }) =>
           const url = URL.createObjectURL(dummyBlob);
           setAudioUrl(url);
           onAudioReady(dummyBlob);
+          onTranscriptReady?.(transcriptRef.current);
           return 5;
         }
         return prev + 1;
@@ -78,8 +143,12 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioReady }) =>
   };
 
   const resetRecording = () => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    transcriptRef.current = '';
     setAudioUrl(null);
     setRecordingTime(0);
+    setLiveTranscript('');
   };
 
   return (
@@ -120,6 +189,15 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({ onAudioReady }) =>
           >
             <RefreshCw className="w-3.5 h-3.5" /> Re-record Voice Note
           </button>
+        </div>
+      )}
+
+      {(isRecording || liveTranscript) && (
+        <div className="w-full max-w-xl bg-white border border-amber-200 rounded-xl p-4 text-left shadow-sm">
+          <p className="text-xs font-extrabold uppercase tracking-wider text-amber-800 mb-2">Live transcript</p>
+          <p className="text-sm text-slate-700 min-h-6">
+            {liveTranscript || 'Listening for speech...'}
+          </p>
         </div>
       )}
     </div>

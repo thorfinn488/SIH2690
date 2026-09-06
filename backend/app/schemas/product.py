@@ -29,6 +29,10 @@ class ProcessProductResponse(BaseModel):
     job_id: str
 
 
+class ProcessProductRequest(BaseModel):
+    transcript: Optional[str] = None
+
+
 class ProcessingStatusResponse(BaseModel):
     product_id: str
     status: str

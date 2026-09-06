@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { ProductDetail, Opportunity } from '../types';
 import { apiRequest } from '../api/client';
-import { ArrowLeft, Edit3, IndianRupee, Tag, Building2, MapPin, Sparkles, CheckCircle2, ShieldCheck, Volume2 } from 'lucide-react';
+import { ArrowLeft, Edit3, IndianRupee, Tag, Building2, MapPin, Sparkles, CheckCircle2, ShieldCheck, Volume2, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface ProductDetailPageProps {
   productId: string;
@@ -23,6 +23,12 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({ productId,
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [saving, setSaving] = useState(false);
+  const [showPriceCustomizer, setShowPriceCustomizer] = useState(false);
+  const [materialCost, setMaterialCost] = useState(650);
+  const [daysToMake, setDaysToMake] = useState(5);
+  const [complexity, setComplexity] = useState<'low' | 'medium' | 'high'>('medium');
+  const [savingPrice, setSavingPrice] = useState(false);
+  const [priceError, setPriceError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadDetail() {
@@ -62,6 +68,45 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({ productId,
       alert('Failed to update catalogue: ' + err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRecalculatePrice = async () => {
+    setSavingPrice(true);
+    setPriceError(null);
+    try {
+      const updatedPrice = await apiRequest<{
+        suggested_price: number;
+        price_range: number[];
+        explanation: string;
+      }>(`/products/${productId}/recalculate-price`, {
+        method: 'POST',
+        body: JSON.stringify({
+          material_cost: materialCost,
+          days_to_make: daysToMake,
+          complexity,
+        }),
+      });
+
+      setProduct((currentProduct) => currentProduct ? {
+        ...currentProduct,
+        price: {
+          suggested_price: updatedPrice.suggested_price,
+          price_range: [updatedPrice.price_range[0], updatedPrice.price_range[1]],
+          explanation: updatedPrice.explanation,
+        },
+        pricing: currentProduct.pricing ? {
+          ...currentProduct.pricing,
+          suggested_price: updatedPrice.suggested_price,
+          price_range_low: updatedPrice.price_range[0],
+          price_range_high: updatedPrice.price_range[1],
+          explanation: updatedPrice.explanation,
+        } : currentProduct.pricing,
+      } : currentProduct);
+    } catch (err: any) {
+      setPriceError(err.message || 'Failed to recalculate price.');
+    } finally {
+      setSavingPrice(false);
     }
   };
 
@@ -189,6 +234,106 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({ productId,
             <p className="text-xs text-slate-700 bg-white/80 p-4 rounded-xl border border-amber-200 leading-relaxed italic">
               "{priceObj.explanation}"
             </p>
+
+            <div className="border-t border-amber-200 pt-4">
+              <button
+                type="button"
+                onClick={() => setShowPriceCustomizer((visible) => !visible)}
+                className="w-full flex items-center justify-between text-left text-sm font-extrabold text-amber-950"
+                aria-expanded={showPriceCustomizer}
+              >
+                <span>Customize Cost &amp; Labor Variables (मूल्य चर समायोजित करें)</span>
+                {showPriceCustomizer ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+              </button>
+
+              {showPriceCustomizer && (
+                <div className="mt-4 space-y-5 bg-white/70 rounded-2xl border border-amber-200 p-5">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <label htmlFor="material-cost" className="text-xs font-bold text-slate-700">Raw Material Cost (₹)</label>
+                      <input
+                        id="material-cost"
+                        type="number"
+                        min="50"
+                        max="20000"
+                        step="50"
+                        value={materialCost}
+                        onChange={(event) => setMaterialCost(Number(event.target.value))}
+                        className="w-28 rounded-lg border border-slate-300 px-2 py-1.5 text-right text-sm font-bold text-slate-900"
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min="50"
+                      max="20000"
+                      step="50"
+                      value={materialCost}
+                      onChange={(event) => setMaterialCost(Number(event.target.value))}
+                      className="w-full accent-amber-600"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <label htmlFor="days-to-make" className="text-xs font-bold text-slate-700">Artisan Labor Time (Days)</label>
+                      <input
+                        id="days-to-make"
+                        type="number"
+                        min="1"
+                        max="60"
+                        value={daysToMake}
+                        onChange={(event) => setDaysToMake(Number(event.target.value))}
+                        className="w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-right text-sm font-bold text-slate-900"
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min="1"
+                      max="60"
+                      value={daysToMake}
+                      onChange={(event) => setDaysToMake(Number(event.target.value))}
+                      className="w-full accent-amber-600"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <span className="text-xs font-bold text-slate-700">Craft Complexity</span>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['low', 'medium', 'high'] as const).map((level) => (
+                        <button
+                          key={level}
+                          type="button"
+                          onClick={() => setComplexity(level)}
+                          className={`rounded-lg border px-3 py-2 text-xs font-bold capitalize transition-colors ${
+                            complexity === level
+                              ? 'border-amber-600 bg-amber-600 text-white'
+                              : 'border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100'
+                          }`}
+                        >
+                          {level}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950 space-y-1">
+                    <p className="font-bold">Labour Cost = {daysToMake} × ₹400/day = ₹{(daysToMake * 400).toLocaleString('en-IN')}</p>
+                    <p>Material Cost = ₹{materialCost.toLocaleString('en-IN')} + Complexity Fee = ₹{({ low: 0, medium: 200, high: 500 }[complexity]).toLocaleString('en-IN')}</p>
+                    <p>+ 25% Sustainable Profit Margin</p>
+                  </div>
+
+                  {priceError && <p className="text-xs font-semibold text-red-600">{priceError}</p>}
+                  <button
+                    type="button"
+                    onClick={handleRecalculatePrice}
+                    disabled={savingPrice}
+                    className="w-full rounded-xl bg-amber-600 px-4 py-3 text-sm font-extrabold text-white shadow-sm transition-colors hover:bg-amber-500 disabled:opacity-50"
+                  >
+                    {savingPrice ? 'Recalculating...' : 'Recalculate & Save Price'}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Buyer Opportunities Section */}

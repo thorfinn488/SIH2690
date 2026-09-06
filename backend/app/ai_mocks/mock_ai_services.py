@@ -1,4 +1,11 @@
 from io import BytesIO
+import json
+from typing import Any
+
+try:
+    import httpx
+except ImportError:
+    httpx = None
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from app.config.settings import settings
 
@@ -62,12 +69,13 @@ def translate_to_english(text: str, source_language: str) -> dict:
 
 def understand_product(transcript: str, vision_data: dict) -> dict:
     """
-    Mock: return a realistic hardcoded structured product based on transcript and vision data.
+    Generate a structured product with Gemini or Groq when configured.
+    Falls back to a realistic hardcoded product if the provider is unavailable.
     Returns: {"name": str, "category": str, "material": str, "craft": str,
               "description": str, "tags": list[str],
               "estimated_days_to_make": int, "material_cost_estimate": float}
     """
-    return {
+    fallback = {
         "name": "Handcrafted Phulkari Silk Embroidery Dupatta",
         "category": "Textiles & Apparel",
         "material": "Pure Cotton with Silk Embroidery",
@@ -77,6 +85,105 @@ def understand_product(transcript: str, vision_data: dict) -> dict:
         "estimated_days_to_make": 5,
         "material_cost_estimate": 650.0,
     }
+
+    prompt = f"""
+You are a product cataloging assistant for Indian artisans. Use the artisan's transcript
+and image analysis below to infer a truthful product listing. Do not invent specific
+claims that are not supported by the input.
+
+Transcript:
+{transcript or "(none provided)"}
+
+Image analysis:
+- category: {vision_data.get("category", "")}
+- detected material: {vision_data.get("detected_material", "")}
+
+Return only one valid JSON object, with no Markdown fences or extra text, matching this
+exact schema and types:
+{{
+  "name": "string",
+  "category": "string",
+  "material": "string",
+  "craft": "string",
+  "description": "string",
+  "tags": ["string"],
+  "estimated_days_to_make": 0,
+  "material_cost_estimate": 0.0
+}}
+""".strip()
+
+    try:
+        if settings.GEMINI_API_KEY:
+            if httpx is None:
+                raise RuntimeError("httpx is not installed")
+            response = httpx.post(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+                params={"key": settings.GEMINI_API_KEY},
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"responseMimeType": "application/json"},
+                },
+                timeout=20.0,
+            )
+            response.raise_for_status()
+            text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+            return _parse_product_response(text)
+
+        if settings.GROQ_API_KEY:
+            if httpx is None:
+                raise RuntimeError("httpx is not installed")
+            response = httpx.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
+                json={
+                    "model": "llama-3.1-8b-instant",
+                    "messages": [
+                        {"role": "system", "content": "Return only valid JSON matching the requested schema."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.2,
+                    "response_format": {"type": "json_object"},
+                },
+                timeout=20.0,
+            )
+            response.raise_for_status()
+            text = response.json()["choices"][0]["message"]["content"]
+            return _parse_product_response(text)
+    except Exception:
+        pass
+
+    return fallback
+
+
+def _parse_product_response(raw_response: str) -> dict[str, Any]:
+    cleaned = raw_response.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+    product = json.loads(cleaned)
+    required_fields = {
+        "name",
+        "category",
+        "material",
+        "craft",
+        "description",
+        "tags",
+        "estimated_days_to_make",
+        "material_cost_estimate",
+    }
+    if set(product) != required_fields:
+        raise ValueError("LLM response did not match the product schema")
+    if not all(isinstance(product[field], str) for field in required_fields - {"tags", "estimated_days_to_make", "material_cost_estimate"}):
+        raise ValueError("LLM response contains invalid text fields")
+    if not isinstance(product["tags"], list) or not all(isinstance(tag, str) for tag in product["tags"]):
+        raise ValueError("LLM response contains invalid tags")
+    if isinstance(product["estimated_days_to_make"], bool) or not isinstance(product["estimated_days_to_make"], int):
+        raise ValueError("LLM response contains invalid production days")
+    if isinstance(product["material_cost_estimate"], bool) or not isinstance(product["material_cost_estimate"], (int, float)):
+        raise ValueError("LLM response contains invalid material cost")
+
+    product["material_cost_estimate"] = float(product["material_cost_estimate"])
+    return product
 
 
 def get_craft_context(craft_name: str) -> dict:

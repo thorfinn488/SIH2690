@@ -17,6 +17,7 @@ export const AddProductPage: React.FC<AddProductPageProps> = ({ onComplete, onCa
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [voiceTranscript, setVoiceTranscript] = useState<string>('');
   const [processingStatus, setProcessingStatus] = useState<ProcessingStatusData | null>(null);
   const [completedProduct, setCompletedProduct] = useState<ProductDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -62,7 +63,10 @@ export const AddProductPage: React.FC<AddProductPageProps> = ({ onComplete, onCa
       }
 
       // 4. Trigger processing
-      await apiRequest<ProcessProductResponse>(`/products/${productId}/process`, { method: 'POST' });
+      await apiRequest<ProcessProductResponse>(`/products/${productId}/process`, {
+        method: 'POST',
+        body: JSON.stringify({ transcript: voiceTranscript }),
+      });
 
       setStep('processing');
       pollProcessingStatus(productId);
@@ -155,7 +159,24 @@ export const AddProductPage: React.FC<AddProductPageProps> = ({ onComplete, onCa
                 <span className="w-6 h-6 rounded-full bg-amber-600 text-white flex items-center justify-center text-xs font-bold">2</span>
                 {t.voiceStep}
               </label>
-              <AudioRecorder onAudioReady={(blob) => setAudioBlob(blob)} />
+              <AudioRecorder
+                onAudioReady={(blob) => setAudioBlob(blob)}
+                onTranscriptReady={setVoiceTranscript}
+              />
+              {voiceTranscript && (
+                <div className="bg-white border border-amber-200 rounded-xl p-4 space-y-2 shadow-sm">
+                  <label htmlFor="voice-transcript" className="text-sm font-extrabold text-amber-950">
+                    Voice Note Transcript (आवाज़ से विवरण)
+                  </label>
+                  <textarea
+                    id="voice-transcript"
+                    value={voiceTranscript}
+                    onChange={(event) => setVoiceTranscript(event.target.value)}
+                    rows={4}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-900 focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Action Buttons */}

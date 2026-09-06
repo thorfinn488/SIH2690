@@ -1,5 +1,11 @@
-from typing import List
-from pydantic import BaseModel, ConfigDict
+from typing import List, Literal
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class PriceRecalculateRequest(BaseModel):
+    material_cost: float = Field(..., ge=50, le=20000)
+    days_to_make: int = Field(..., ge=1, le=60)
+    complexity: Literal["low", "medium", "high"]
 
 
 class PriceSchema(BaseModel):
